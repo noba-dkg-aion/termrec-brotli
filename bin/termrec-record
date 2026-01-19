@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${TERMREC_DIR:=$HOME/ops/termrec}"
+: "${TERMREC_KEEP_RAW:=0}"
+: "${TERMREC_TOOL:=}"
+
+if [ -n "${TERMREC_PAUSE:-}" ]; then
+  echo "termrec: paused (TERMREC_PAUSE set)." >&2
+  exit 0
+fi
+
+mkdir -p "$TERMREC_DIR"
+
+date_dir="$(date +%F)"
+mkdir -p "$TERMREC_DIR/$date_dir"
+
+session_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
+user="${USER:-$(id -un 2>/dev/null || echo unknown)}"
+host="${HOSTNAME:-$(hostname 2>/dev/null || echo unknown)}"
+start_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if [ -z "$TERMREC_TOOL" ]; then
+  if command -v asciinema >/dev/null 2>&1; then
+    TERMREC_TOOL="asciinema"
+  elif command -v script >/dev/null 2>&1; then
+    TERMREC_TOOL="script"
+  else
+    echo "termrec: no recorder found (asciinema or script required)." >&2
+    exit 1
+  fi
+fi
+
+raw_ext="cast"
+timing_file=""
+timing_json="null"
+if [ "$TERMREC_TOOL" = "script" ]; then
+  raw_ext="log"
+  timing_file="$TERMREC_DIR/$date_dir/${session_id}.timing"
+  timing_json="\"${timing_file}\""
+fi
+
+raw_file="$TERMREC_DIR/$date_dir/${session_id}.${raw_ext}"
+meta_file="$TERMREC_DIR/$date_dir/${session_id}.meta.json"
+compressed_file="${raw_file}.br"
+
+cat > "$meta_file" <<JSON
+{
+  "session_id": "${session_id}",
+  "tool": "${TERMREC_TOOL}",
+  "start_ts": "${start_ts}",
+  "end_ts": null,
+  "exit_status": null,
+  "user": "${user}",
+  "host": "${host}",
+  "cwd": "${PWD}",
+  "shell": "${SHELL:-}",
+  "pid": $$,
+  "tty": "$(tty 2>/dev/null || echo unknown)",
+  "raw_file": "${raw_file}",
+  "timing_file": ${timing_json},
+  "compressed_file": "${compressed_file}"
+}
+JSON
+
+record_cmd=()
+if [ "$TERMREC_TOOL" = "asciinema" ]; then
+  record_cmd=(asciinema rec -q -c "TERMREC_ACTIVE=1 TERMREC_SESSION_ID=${session_id} ${SHELL:-/bin/sh}" "$raw_file")
+else
+  record_cmd=(script -q -f -t "$timing_file" -c "TERMREC_ACTIVE=1 TERMREC_SESSION_ID=${session_id} ${SHELL:-/bin/sh}" "$raw_file")
+fi
+
+"${record_cmd[@]}"
+exit_status=$?
+end_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+cat > "$meta_file" <<JSON
+{
+  "session_id": "${session_id}",
+  "tool": "${TERMREC_TOOL}",
+  "start_ts": "${start_ts}",
+  "end_ts": "${end_ts}",
+  "exit_status": ${exit_status},
+  "user": "${user}",
+  "host": "${host}",
+  "cwd": "${PWD}",
+  "shell": "${SHELL:-}",
+  "pid": $$,
+  "tty": "$(tty 2>/dev/null || echo unknown)",
+  "raw_file": "${raw_file}",
+  "timing_file": ${timing_json},
+  "compressed_file": "${compressed_file}"
+}
+JSON
+
+if command -v brotli >/dev/null 2>&1; then
+  if brotli -f -q 11 "$raw_file"; then
+    if [ "$TERMREC_KEEP_RAW" != "1" ]; then
+      rm -f "$raw_file"
+    fi
+  fi
+  if [ -n "$timing_file" ] && [ -f "$timing_file" ]; then
+    if brotli -f -q 11 "$timing_file"; then
+      if [ "$TERMREC_KEEP_RAW" != "1" ]; then
+        rm -f "$timing_file"
+      fi
+    fi
+  fi
+else
+  echo "termrec: brotli not found; leaving raw file uncompressed." >&2
+fi
+
+# Sweep any leftovers
+command termrec-sweep >/dev/null 2>&1 || true
+
+exit "$exit_status"

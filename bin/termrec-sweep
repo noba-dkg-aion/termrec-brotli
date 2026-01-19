@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${TERMREC_DIR:=$HOME/ops/termrec}"
+: "${TERMREC_KEEP_RAW:=0}"
+: "${TERMREC_MIN_AGE_SECS:=60}"
+
+if ! command -v brotli >/dev/null 2>&1; then
+  exit 0
+fi
+
+min_age_min=$(( (TERMREC_MIN_AGE_SECS + 59) / 60 ))
+if [ "$min_age_min" -lt 1 ]; then
+  min_age_min=1
+fi
+
+if [ ! -d "$TERMREC_DIR" ]; then
+  exit 0
+fi
+
+find "$TERMREC_DIR" -type f \( -name "*.cast" -o -name "*.log" -o -name "*.timing" \) -mmin +"$min_age_min" | while read -r f; do
+  if [ -f "$f" ]; then
+    if brotli -f -q 11 "$f"; then
+      if [ "$TERMREC_KEEP_RAW" != "1" ]; then
+        rm -f "$f"
+      fi
+    fi
+  fi
+done
