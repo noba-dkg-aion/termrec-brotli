@@ -25,7 +25,9 @@ fi
 
 # Auto-start recorder unless paused or already inside recorder
 if [[ "${TERMREC_AUTOREC}" == "1" && -z "${TERMREC_ACTIVE:-}" && -z "${TERMREC_PAUSE:-}" ]]; then
-  exec termrec-record --auto
+  if command -v termrec-record >/dev/null 2>&1; then
+    exec termrec-record --auto
+  fi
 fi
 
 # On exit, sweep any leftover uncompressed recordings
