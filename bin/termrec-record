@@ -70,8 +70,10 @@ else
   record_cmd=(script -q -f -t "$timing_file" -c "TERMREC_ACTIVE=1 TERMREC_SESSION_ID=${session_id} ${SHELL:-/bin/sh}" "$raw_file")
 fi
 
+set +e
 "${record_cmd[@]}"
 exit_status=$?
+set -e
 end_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cat > "$meta_file" <<JSON
